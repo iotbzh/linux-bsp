@@ -145,6 +145,8 @@ static const struct mssr_mod_clk r8a77990_mod_clks[] __initconst = {
 	DEF_MOD("msiof2",		 209,	R8A77990_CLK_MSO),
 	DEF_MOD("msiof1",		 210,	R8A77990_CLK_MSO),
 	DEF_MOD("msiof0",		 211,	R8A77990_CLK_MSO),
+	/* FIXME: parent clock 'MS0' looks wrong */
+	DEF_MOD("mfis",		         213,	R8A77990_CLK_MSO),
 	DEF_MOD("sys-dmac2",		 217,	R8A77990_CLK_S3D1),
 	DEF_MOD("sys-dmac1",		 218,	R8A77990_CLK_S3D1),
 	DEF_MOD("sys-dmac0",		 219,	R8A77990_CLK_S3D1),
