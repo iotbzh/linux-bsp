@@ -19,6 +19,30 @@
 	};
 
 	reserved-memory {
+                #address-cells = <2>;
+                #size-cells = <2>;
+                ranges;
+
+                cr7_ram: cr7_ram@0x40040000 {
+                        no-map;
+                        reg = <0x0 0x40040000 0x0 0x1fc0000>;
+                };
+
+                vdev0vring0: vdev0vring0@42000000 {
+                        no-map;
+                        reg = <0x0 0x42000000 0x0 0x1000>;
+                };
+
+                vdev0vring1: vdev0vring1@42010000 {
+                        no-map;
+                        reg = <0x0 0x42010000 0x0 0x1000>;
+                };
+
+                vdev0buffer: vdev0buffer@42020000 {
+                        no-map;
+                        reg = <0x0 0x42020000 0x0 0x4000>;
+                };
+
 		/* device specific region for Lossy Decompression */
 		lossy_decompress: linux,lossy_decompress@54000000 {
 			no-map;
@@ -35,3 +59,11 @@
 	/* Map all possible DDR as inbound ranges */
 	dma-ranges = <0x42000000 0 0x40000000 0 0x40000000 0 0x80000000>;
 };
+
+&cr7_rproc {
+        memory-region = <&cr7_ram>, <&vdev0vring0>, <&vdev0vring1>, <&vdev0buffer>;
+        mboxes = <&mfis 0>, <&mfis 1>;
+        mbox-names = "tx", "rx";
+        rcar,syscfg-rsc-tbl = <&mfisarembr 0x0 0xFFFFFFFF>;
+        status = "okay";
+ };
