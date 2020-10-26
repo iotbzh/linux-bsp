@@ -234,6 +234,21 @@ config QCOM_WCNSS_PIL
 	  Say y here to support the Peripheral Image Loader for the Qualcomm
 	  Wireless Connectivity Subsystem.
 
+config RCAR_RPROC
+	tristate "Renesas RCAR remoteproc support"
+	depends on ARCH_RENESAS
+	depends on REMOTEPROC
+	select MAILBOX
+	help
+	  Say y here to support RCAR MCU processors via the
+	  remote processor framework.
+
+	  You want to say y here in order to enable AMP
+	  use-cases to run on your platform (dedicated firmware could be
+	  offloaded to remote MCU processors using this framework).
+
+	  This can be either built-in or a loadable module.
+
 config ST_REMOTEPROC
 	tristate "ST remoteproc support"
 	depends on ARCH_STI
