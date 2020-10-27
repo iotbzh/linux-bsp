@@ -800,19 +800,11 @@
 		#size-cells = <2>;
 		ranges;
 
-		mfis: mfis@e6260000 {
-			compatible = "renesas,mfis-lock-r8a7795",
-				     "renesas,mfis-lock";
-			reg = <0 0xe6260000 0 0x1000>;
-			#hwlock-cells = <1>;
-
-			mfis_as: mfis-as {
-				compatible = "renesas,mfis-as-r8a7795",
-					     "renesas,mfis-as";
-				interrupts = <GIC_SPI 180 IRQ_TYPE_LEVEL_HIGH>;
-				interrupt-names = "eicr0";
-				renesas,mfis-ch = <0>;
-			};
+		cr7_rproc: cr7@40040000 {
+			compatible = "renesas,rcar-cr7";
+			power-domains = <&sysc R8A7795_PD_CR7>;
+			resets = <&cpg 222>;
+			status = "disabled";
 		};
 
 		rwdt: watchdog@e6020000 {
@@ -1141,6 +1133,26 @@
 			status = "disabled";
 		};
 
+		mfis: mailbox@e6260400 {
+			compatible = "renesas,rcar-ipcc";
+			#mbox-cells = <1>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <0 0xe6260400 0 0x10>;
+			interrupts =
+				<GIC_SPI 224 IRQ_TYPE_LEVEL_HIGH>,
+				<GIC_SPI 225 IRQ_TYPE_LEVEL_HIGH>;
+			interrupt-names = "tx", "rx";
+			clocks = <&cpg  CPG_MOD 213>;
+			power-domains = <&sysc R8A7795_PD_ALWAYS_ON>;
+			resets = <&cpg 213>;
+		};
+
+		mfisarembr: mfisarembr@e6260460{
+			compatible = "simple-bus", "syscon", "simple-mfd";
+			reg = <0 0xe6260460 0 0x20>;
+		};
+	
 		i2c0: i2c@e6500000 {
 			#address-cells = <1>;
 			#size-cells = <0>;
