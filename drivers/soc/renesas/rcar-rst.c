@@ -12,6 +12,8 @@
 
 #define WDTRSTCR_RESET		0xA55A0002
 #define WDTRSTCR		0x0054
+#define CR7BAR                  0x0070
+#define CR7BAREN                BIT(4)
 
 static int rcar_rst_enable_wdt_reset(void __iomem *base)
 {
@@ -84,7 +86,7 @@ static const struct of_device_id rcar_rst_matches[] __initconst = {
 	{ /* sentinel */ }
 };
 
-static void __iomem *rcar_rst_base __initdata;
+static void __iomem *rcar_rst_base;
 static u32 saved_mode __initdata;
 
 static int __init rcar_rst_init(void)
@@ -136,5 +138,24 @@ int __init rcar_rst_read_mode_pins(u32 *mode)
 	}
 
 	*mode = saved_mode;
+	return 0;
+}
+
+int rcar_rst_set_rproc_boot_addr(u32 boot_addr)
+{
+	if (!rcar_rst_base) {
+			return -EIO;
+	}
+
+	if (boot_addr % SZ_4K) {
+		pr_debug("Invalid boot address for remote processor,"
+		       "should be aligned on 4k got %x\n", boot_addr);
+		pr_debug("rounding down to 4k\n");
+		boot_addr -= boot_addr % SZ_4K;
+	}
+
+	boot_addr |= CR7BAREN;
+	iowrite32(boot_addr, rcar_rst_base + CR7BAR);
+
 	return 0;
 }
