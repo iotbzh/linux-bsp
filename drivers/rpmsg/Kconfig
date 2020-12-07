@@ -15,6 +15,12 @@ config RPMSG_CHAR
 	  in /dev. They make it possible for user-space programs to send and
 	  receive rpmsg packets.
 
+config RPMSG_RCAR_CHAR
+       bool "RPMSG device interface for RCAR board"
+       depends on RPMSG_CHAR
+       help
+         Add RPMSG_CHAR support for RCAR
+
 config RPMSG_MTK_SCP
 	tristate "MediaTek SCP"
 	depends on MTK_SCP

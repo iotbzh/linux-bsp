@@ -123,12 +123,15 @@ static int rpmsg_ept_cb(struct rpmsg_device *rpdev, void *buf, int len,
 static int rpmsg_eptdev_open(struct inode *inode, struct file *filp)
 {
 	struct rpmsg_eptdev *eptdev = cdev_to_eptdev(inode->i_cdev);
+#ifndef CONFIG_RPMSG_RCAR_CHAR
 	struct rpmsg_endpoint *ept;
 	struct rpmsg_device *rpdev = eptdev->rpdev;
+#endif /* CONFIG_RPMSG_RCAR_CHAR */
 	struct device *dev = &eptdev->dev;
 
 	get_device(dev);
 
+#ifndef CONFIG_RPMSG_RCAR_CHAR
 	ept = rpmsg_create_ept(rpdev, rpmsg_ept_cb, eptdev, eptdev->chinfo);
 	if (!ept) {
 		dev_err(dev, "failed to open %s\n", eptdev->chinfo.name);
@@ -137,6 +140,7 @@ static int rpmsg_eptdev_open(struct inode *inode, struct file *filp)
 	}
 
 	eptdev->ept = ept;
+#endif /* CONFIG_RPMSG_RCAR_CHAR */
 	filp->private_data = eptdev;
 
 	return 0;
@@ -336,21 +340,35 @@ static void rpmsg_eptdev_release_device(struct device *dev)
 	kfree(eptdev);
 }
 
+#ifndef CONFIG_RPMSG_RCAR_CHAR
 static int rpmsg_eptdev_create(struct rpmsg_ctrldev *ctrldev,
 			       struct rpmsg_channel_info chinfo)
 {
 	struct rpmsg_device *rpdev = ctrldev->rpdev;
+#else
+static int rpmsg_eptdev_create(struct rpmsg_device *rpdev)
+{
+#endif /* CONFIG_RPMSG_RCAR_CHAR */
 	struct rpmsg_eptdev *eptdev;
 	struct device *dev;
 	int ret;
-
 	eptdev = kzalloc(sizeof(*eptdev), GFP_KERNEL);
 	if (!eptdev)
 		return -ENOMEM;
 
 	dev = &eptdev->dev;
 	eptdev->rpdev = rpdev;
+#ifndef CONFIG_RPMSG_RCAR_CHAR
 	eptdev->chinfo = chinfo;
+#else
+	memcpy(eptdev->chinfo.name, rpdev->id.name, RPMSG_NAME_SIZE);
+	eptdev->chinfo.name[RPMSG_NAME_SIZE-1] = '\0';
+
+	eptdev->chinfo.src = rpdev->src;
+	eptdev->chinfo.dst = rpdev->dst;
+	eptdev->ept = rpdev->ept;
+	eptdev->ept->priv=eptdev;
+#endif /* CONFIG_RPMSG_RCAR_CHAR */
 
 	mutex_init(&eptdev->ept_lock);
 	spin_lock_init(&eptdev->queue_lock);
@@ -359,7 +377,11 @@ static int rpmsg_eptdev_create(struct rpmsg_ctrldev *ctrldev,
 
 	device_initialize(dev);
 	dev->class = rpmsg_class;
+#ifndef CONFIG_RPMSG_RCAR_CHAR
 	dev->parent = &ctrldev->dev;
+#else
+	dev->parent = &rpdev->dev;
+#endif /* CONFIG_RPMSG_RCAR_CHAR */
 	dev->groups = rpmsg_eptdev_groups;
 	dev_set_drvdata(dev, eptdev);
 
@@ -422,6 +444,7 @@ static int rpmsg_ctrldev_release(struct inode *inode, struct file *filp)
 	return 0;
 }
 
+#ifndef CONFIG_RPMSG_RCAR_CHAR
 static long rpmsg_ctrldev_ioctl(struct file *fp, unsigned int cmd,
 				unsigned long arg)
 {
@@ -542,6 +565,22 @@ static struct rpmsg_driver rpmsg_chrdev_driver = {
 		.name = "rpmsg_chrdev",
 	},
 };
+#else
+static struct rpmsg_device_id rpmsg_driver_sample_id_table[] = {
+	{ .name	= "rpmsg-char-sample" },
+	{ },
+};
+MODULE_DEVICE_TABLE(rpmsg, rpmsg_driver_sample_id_table);
+
+static struct rpmsg_driver rpmsg_chrdev_driver = {
+	.id_table	= rpmsg_driver_sample_id_table,
+	.callback	= rpmsg_ept_cb,
+	.probe		= rpmsg_eptdev_create,
+	.drv = {
+		.name = "rpmsg_chrdev",
+	},
+};
+#endif /* CONFIG_RPMSG_RCAR_CHAR */
 
 static int rpmsg_char_init(void)
 {
