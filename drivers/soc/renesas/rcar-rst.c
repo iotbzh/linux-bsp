@@ -159,3 +159,4 @@ int rcar_rst_set_rproc_boot_addr(u32 boot_addr)
 
 	return 0;
 }
+EXPORT_SYMBOL(rcar_rst_set_rproc_boot_addr);

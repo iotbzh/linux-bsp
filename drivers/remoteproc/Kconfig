@@ -238,6 +238,7 @@ config RCAR_RPROC
 	tristate "Renesas RCAR remoteproc support"
 	depends on ARCH_RENESAS
 	depends on REMOTEPROC
+	depends on RST_RCAR
 	select MAILBOX
 	help
 	  Say y here to support RCAR MCU processors via the

@@ -1,10 +1,14 @@
+#include <linux/limits.h>
 #include <linux/mailbox_client.h>
 #include <linux/mfd/syscon.h>
 #include <linux/module.h>
 #include <linux/of_device.h>
 #include <linux/of_reserved_mem.h>
+#include <linux/pm_runtime.h>
 #include <linux/regmap.h>
 #include <linux/remoteproc.h>
+#include <linux/reset.h>
+#include <linux/soc/renesas/rcar-rst.h>
 #include <linux/workqueue.h>
 
 #include "remoteproc_internal.h"
@@ -25,6 +29,7 @@ struct rcar_rproc {
 	struct mbox_client              cl;
 	struct mbox_chan		*tx_ch;
 	struct mbox_chan		*rx_ch;
+	struct reset_control            *rst;
 	struct workqueue_struct         *workqueue;
 	struct work_struct              vq_work;
 	struct rcar_syscon              rsctbl;
@@ -127,10 +132,44 @@ static int rcar_rproc_attach(struct rproc *rproc)
 	return 0;
 }
 
-static struct rproc_ops rcar_rproc_ops = {
-	.attach		= rcar_rproc_attach,
-	.kick		= rcar_rproc_kick,
-};
+static int rcar_rproc_start(struct rproc *rproc)
+{
+	struct rcar_rproc *priv = rproc->priv;
+	int err;
+
+	if (!rproc->bootaddr)
+		return -EINVAL;
+
+	/* RCar remote proc only support boot address on 32 bits */
+	if (rproc->bootaddr > U32_MAX)
+		return -EINVAL;
+
+	err = rcar_rst_set_rproc_boot_addr((u32)rproc->bootaddr);
+	if (err) {
+		dev_err(&rproc->dev, "failed to set rproc boot addr\n");
+		return err;
+	}
+
+	err = reset_control_deassert(priv->rst);
+	if (err) {
+		dev_err(&rproc->dev, "failed to bring out of reset\n");
+	}
+
+	return err;
+}
+
+static int rcar_rproc_stop(struct rproc *rproc)
+{
+	struct rcar_rproc *priv = rproc->priv;
+	int err;
+
+	err = reset_control_assert(priv->rst);
+	if (err) {
+		dev_err(&rproc->dev, "failed to put in reset\n");
+	}
+
+	return err;
+}
 
 static int rcar_rproc_pa_to_da(struct rproc *rproc, phys_addr_t pa, u64 *da)
 {
@@ -213,6 +252,38 @@ static int rcar_rproc_parse_memory_regions(struct rproc *rproc)
 	}
 
 	return 0;
+};
+
+static int rcar_rproc_elf_load_rsc_table(struct rproc *rproc,
+					  const struct firmware *fw)
+{
+	if (rproc_elf_load_rsc_table(rproc, fw))
+		dev_info(&rproc->dev, "no resource table found for this firmware\n");
+
+	return 0;
+}
+
+static int rcar_rproc_parse_fw(struct rproc *rproc, const struct firmware *fw)
+{
+	int ret = rcar_rproc_parse_memory_regions(rproc);
+
+	if (ret)
+		return ret;
+
+	return rcar_rproc_elf_load_rsc_table(rproc, fw);
+}
+
+static struct rproc_ops rcar_rproc_ops = {
+	.start		= rcar_rproc_start,
+	.stop		= rcar_rproc_stop,
+	.attach		= rcar_rproc_attach,
+	.kick		= rcar_rproc_kick,
+	.load		= rproc_elf_load_segments,
+	.parse_fw	= rcar_rproc_parse_fw,
+	.find_loaded_rsc_table = rproc_elf_find_loaded_rsc_table,
+	.sanity_check	= rproc_elf_sanity_check,
+	.get_boot_addr	= rproc_elf_get_boot_addr,
+
 };
 
 static int rcar_rproc_get_syscon(struct device_node *np, const char *prop,
@@ -310,18 +381,29 @@ static int rcar_rproc_probe(struct platform_device *pdev)
 	priv->rproc = rproc;
 	priv->dev = dev;
 
+	priv->rst = devm_reset_control_get_exclusive(&pdev->dev, NULL);
+	if (IS_ERR(priv->rst)) {
+		ret = PTR_ERR(priv->rst);
+		dev_err(dev, "failed to get rproc reset\n");
+		goto free_rproc;
+	}
+
+	pm_runtime_enable(priv->dev);
+	ret = pm_runtime_get_sync(priv->dev);
+	if (ret) {
+		dev_err(&rproc->dev, "failed to power up\n");
+		goto free_rproc;
+	}
+
 	dev_set_drvdata(dev, rproc);
 
 	ret = rcar_rproc_get_loaded_rsc_table(pdev, rproc, priv);
-	if (ret)
-		goto free_rproc;
-
-	ret = rcar_rproc_parse_memory_regions(rproc);
-	if (ret)
-		goto free_rproc;
-
-	/* Assume rproc is loaded by another component e.g u-boot */
-	rproc->state = RPROC_DETACHED;
+	if (!ret) {
+		rproc->state = RPROC_DETACHED;
+		ret = rcar_rproc_parse_memory_regions(rproc);
+		if (ret)
+			goto free_rproc;
+	}
 
 	priv->workqueue = create_workqueue(dev_name(dev));
 	if (!priv->workqueue) {
@@ -348,6 +430,7 @@ free_wkq:
 	destroy_workqueue(priv->workqueue);
 free_resources:
 	rproc_resource_cleanup(rproc);
+	pm_runtime_disable(priv->dev);
 free_rproc:
 	rproc_free(rproc);
 
@@ -362,6 +445,7 @@ static int rcar_rproc_remove(struct platform_device *pdev)
 	rproc_del(rproc);
 	rcar_rproc_free_mbox(rproc);
 	destroy_workqueue(priv->workqueue);
+	pm_runtime_disable(priv->dev);
 	if (priv->rsc_va)
 		iounmap(priv->rsc_va);
 	rproc_free(rproc);
