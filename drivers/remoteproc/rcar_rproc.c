@@ -403,6 +403,9 @@ static int rcar_rproc_probe(struct platform_device *pdev)
 		ret = rcar_rproc_parse_memory_regions(rproc);
 		if (ret)
 			goto free_rproc;
+	} else {
+		/* Manually start the rproc */
+		rproc->auto_boot = false;
 	}
 
 	priv->workqueue = create_workqueue(dev_name(dev));
