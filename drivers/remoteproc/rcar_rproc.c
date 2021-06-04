@@ -10,16 +10,23 @@
 #include <linux/reset.h>
 #include <linux/soc/renesas/rcar-rst.h>
 #include <linux/workqueue.h>
+#include <linux/tee_remoteproc.h>
 
 #include "remoteproc_internal.h"
 
-#define RCAR_RX_VQ_ID 0
-#define RSC_TBL_SIZE		1024
+#define RCAR_RX_VQ_ID   0
+#define RSC_TBL_SIZE	1024
+#define RCAR_CR7_FW_ID  0
 
 struct rcar_syscon {
 	struct regmap *map;
 	u32 reg;
 	u32 mask;
+};
+
+struct rcar_rproc_conf {
+	bool secured_fw;
+	struct rproc_ops *ops;
 };
 
 struct rcar_rproc {
@@ -34,6 +41,10 @@ struct rcar_rproc {
 	struct work_struct              vq_work;
 	struct rcar_syscon              rsctbl;
 	void __iomem                    *rsc_va;
+	bool                            secured_fw;
+	bool                            fw_loaded;
+	struct tee_rproc                *trproc;
+
 };
 
 static void rcar_rproc_vq_work(struct work_struct *work)
@@ -254,23 +265,94 @@ static int rcar_rproc_parse_memory_regions(struct rproc *rproc)
 	return 0;
 };
 
-static int rcar_rproc_elf_load_rsc_table(struct rproc *rproc,
-					  const struct firmware *fw)
+static int rcar_rproc_parse_fw(struct rproc *rproc, const struct firmware *fw)
 {
-	if (rproc_elf_load_rsc_table(rproc, fw))
+	struct rcar_rproc *priv = rproc->priv;
+	int ret;
+
+	ret = rcar_rproc_parse_memory_regions(rproc);
+	if (ret)
+		return ret;
+
+	if (priv->trproc)
+		ret = rproc_tee_get_rsc_table(priv->trproc);
+	else
+		ret = rproc_elf_load_rsc_table(rproc, fw);
+
+	/* Some firmwares do not have a resource table, that's not an error */
+	if (ret)
 		dev_info(&rproc->dev, "no resource table found for this firmware\n");
 
 	return 0;
 }
 
-static int rcar_rproc_parse_fw(struct rproc *rproc, const struct firmware *fw)
+static int rcar_rproc_tee_start(struct rproc *rproc)
 {
-	int ret = rcar_rproc_parse_memory_regions(rproc);
+	struct rcar_rproc *priv = rproc->priv;
 
+	return tee_rproc_start(priv->trproc);
+}
+
+static int rcar_rproc_tee_stop(struct rproc *rproc)
+{
+	struct rcar_rproc *priv = rproc->priv;
+	int err;
+
+	err = tee_rproc_stop(priv->trproc);
+	if (!err)
+		priv->fw_loaded = false;
+
+	return err;
+}
+
+static int rcar_rproc_tee_elf_sanity_check(struct rproc *rproc,
+					   const struct firmware *fw)
+{
+	struct rcar_rproc *priv = rproc->priv;
+	int ret = 0;
+
+	if (rproc->state == RPROC_DETACHED)
+		return 0;
+
+	ret = tee_rproc_load_fw(priv->trproc, fw);
+	if (!ret)
+		priv->fw_loaded = true;
+
+	return ret;
+}
+
+static struct resource_table *
+rcar_rproc_tee_elf_find_loaded_rsc_table(struct rproc *rproc,
+					 const struct firmware *fw)
+{
+	struct rcar_rproc *priv = rproc->priv;
+
+	return tee_rproc_get_loaded_rsc_table(priv->trproc);
+}
+
+static int rcar_rproc_tee_elf_load(struct rproc *rproc,
+				    const struct firmware *fw)
+{
+	struct rcar_rproc *priv = rproc->priv;
+	int ret;
+
+	if (priv->fw_loaded)
+		return 0;
+
+	ret =  tee_rproc_load_fw(priv->trproc, fw);
 	if (ret)
 		return ret;
+	priv->fw_loaded = true;
 
-	return rcar_rproc_elf_load_rsc_table(rproc, fw);
+	/* update the resource table parameters */
+	if (rproc_tee_get_rsc_table(priv->trproc)) {
+		/* no resource table: reset the related fields */
+		rproc->cached_table = NULL;
+		rproc->table_ptr = NULL;
+		rproc->table_sz = 0;
+	}
+
+	return 0;
 }
 
 static struct rproc_ops rcar_rproc_ops = {
@@ -284,6 +366,17 @@ static struct rproc_ops rcar_rproc_ops = {
 	.sanity_check	= rproc_elf_sanity_check,
 	.get_boot_addr	= rproc_elf_get_boot_addr,
 
+};
+
+static struct rproc_ops rcar_rproc_tee_ops = {
+	.start		= rcar_rproc_tee_start,
+	.stop		= rcar_rproc_tee_stop,
+	.attach		= rcar_rproc_attach,
+	.kick		= rcar_rproc_kick,
+	.parse_fw	= rcar_rproc_parse_fw,
+	.find_loaded_rsc_table = rcar_rproc_tee_elf_find_loaded_rsc_table,
+	.sanity_check	= rcar_rproc_tee_elf_sanity_check,
+	.load		= rcar_rproc_tee_elf_load,
 };
 
 static int rcar_rproc_get_syscon(struct device_node *np, const char *prop,
@@ -363,15 +456,45 @@ static int rcar_rproc_get_loaded_rsc_table(struct platform_device *pdev,
 	return 0;
 };
 
+static const struct rcar_rproc_conf rcar_rproc_default_conf = {
+	.secured_fw = false,
+	.ops = &rcar_rproc_ops,
+};
+
+static const struct rcar_rproc_conf rcar_rproc_tee_conf = {
+	.secured_fw = true,
+	.ops = &rcar_rproc_tee_ops,
+};
+
+static const struct of_device_id rcar_rproc_of_match[] = {
+	{
+		.compatible = "renesas,rcar-cr7",
+		.data = &rcar_rproc_default_conf,
+	},
+	{
+		.compatible = "renesas,rcar-cr7_optee",
+		.data = &rcar_rproc_tee_conf,
+	},
+	{},
+};
+
 static int rcar_rproc_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
 	struct device_node *np = dev->of_node;
+	const struct of_device_id *of_id;
+	const struct rcar_rproc_conf *conf;
 	struct rcar_rproc *priv;
 	struct rproc *rproc;
 	int ret;
 
-	rproc = rproc_alloc(dev, np->name, &rcar_rproc_ops,
+	of_id = of_match_device(rcar_rproc_of_match, &pdev->dev);
+	if (of_id)
+		conf = (const struct rcar_rproc_conf *)of_id->data;
+	else
+		return -EINVAL;
+
+	rproc = rproc_alloc(dev, np->name, conf->ops,
 			    NULL, sizeof(*priv));
 
 	if (!rproc)
@@ -380,6 +503,7 @@ static int rcar_rproc_probe(struct platform_device *pdev)
 	priv = rproc->priv;
 	priv->rproc = rproc;
 	priv->dev = dev;
+	priv->secured_fw = conf->secured_fw;
 
 	priv->rst = devm_reset_control_get_exclusive(&pdev->dev, NULL);
 	if (IS_ERR(priv->rst)) {
@@ -403,9 +527,6 @@ static int rcar_rproc_probe(struct platform_device *pdev)
 		ret = rcar_rproc_parse_memory_regions(rproc);
 		if (ret)
 			goto free_rproc;
-	} else {
-		/* Manually start the rproc */
-		rproc->auto_boot = false;
 	}
 
 	priv->workqueue = create_workqueue(dev_name(dev));
@@ -419,14 +540,26 @@ static int rcar_rproc_probe(struct platform_device *pdev)
 	if (ret)
 		goto free_wkq;
 
+	if (priv->secured_fw) {
+		priv->trproc = tee_rproc_register(dev, rproc,
+						   RCAR_CR7_FW_ID);
+		if (IS_ERR(priv->trproc)) {
+			ret = PTR_ERR(priv->trproc);
+			dev_err_probe(dev, ret, "TEE rproc device not found\n");
+			goto free_mb;
+		}
+	}
+
 	ret = rproc_add(rproc);
 	if (ret) {
 		dev_err(dev, "rproc_add failed\n");
-		goto free_mb;
+		goto free_tee;
 	}
 
 	return 0;
-
+free_tee:
+	if (priv->trproc)
+		tee_rproc_unregister(priv->trproc);
 free_mb:
 	rcar_rproc_free_mbox(rproc);
 free_wkq:
@@ -446,6 +579,8 @@ static int rcar_rproc_remove(struct platform_device *pdev)
 	struct rcar_rproc *priv = rproc->priv;
 
 	rproc_del(rproc);
+	if (priv->trproc)
+		tee_rproc_unregister(priv->trproc);
 	rcar_rproc_free_mbox(rproc);
 	destroy_workqueue(priv->workqueue);
 	pm_runtime_disable(priv->dev);
@@ -455,11 +590,6 @@ static int rcar_rproc_remove(struct platform_device *pdev)
 
 	return 0;
 }
-
-static const struct of_device_id rcar_rproc_of_match[] = {
-	{ .compatible = "renesas,rcar-cr7" },
-	{},
-};
 
 MODULE_DEVICE_TABLE(of, rcar_rproc_of_match);
 
