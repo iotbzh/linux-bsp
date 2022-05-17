@@ -16,6 +16,7 @@
 	aliases {
 		serial0 = &hscif0;
 		serial1 = &hscif1;
+		eth0	= &rswitch;
 	};
 
 	chosen {
@@ -167,6 +168,35 @@
 		function = "pcie";
 	};
 
+	tsn0_pins: tsn0 {
+		mux {
+			groups = "tsn0_link", "tsn0_mdio";
+			function = "tsn0";
+			drive-strength = <18>;
+			power-source = <3300>;
+		};
+
+		pins_mdio {
+			groups = "tsn0_mdio";
+			drive-strength = <18>;
+			power-source = <3300>;
+		};
+	};
+
+	tsn1_pins: tsn1 {
+		mux {
+			groups = "tsn1_link", "tsn1_mdio";
+			function = "tsn1";
+			drive-strength = <18>;
+			power-source = <3300>;
+		};
+
+		pins_mdio {
+			groups = "tsn1_mdio";
+			drive-strength = <18>;
+			power-source = <3300>;
+		};
+	};
 };
 
 &rwdt {
@@ -230,4 +260,39 @@
 	status = "disabled";
 	pinctrl-0 = <&pcie1_pins>;
 	pinctrl-names = "default";
+};
+
+&rswitch {
+	status = "okay";
+	pinctrl-0 = <&tsn0_pins &tsn1_pins>;
+	pinctrl-names = "default";
+	#address-cells = <1>;
+	#size-cells = <0>;
+
+	ports {
+		#address-cells = <1>;
+		#size-cells = <0>;
+		tsn0: port@0 {
+			reg = <0>;
+			phy-mode = "usxgmii";
+			phy-handle = <&etha0>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			etha0: ethernet-phy@0 {
+				reg = <1>;
+				compatible = "ethernet-phy-ieee802.3-c45";
+			};
+		};
+		tsn1: port@1 {
+			reg = <1>;
+			phy-mode = "usxgmii";
+			phy-handle = <&etha1>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			etha1: ethernet-phy@1 {
+				reg = <2>;
+				compatible = "ethernet-phy-ieee802.3-c45";
+			};
+		};
+	};
 };
