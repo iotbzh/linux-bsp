@@ -157,6 +157,16 @@
 		function = "scif_clk";
 	};
 
+	pcie0_pins: pcie0 {
+		groups = "pcie0_clkreq_n";
+		function = "pcie";
+	};
+
+	pcie1_pins: pcie1 {
+		groups = "pcie1_clkreq_n";
+		function = "pcie";
+	};
+
 };
 
 &rwdt {
@@ -192,4 +202,32 @@
 
 &scif_clk {
 	clock-frequency = <24000000>;
+};
+
+&pcie_bus_clk {
+	clock-frequency = <100000000>;
+};
+
+&pciec0 {
+	status = "okay";
+	pinctrl-0 = <&pcie0_pins>;
+	pinctrl-names = "default";
+};
+
+&pciec0_ep {
+	status = "disabled";
+	pinctrl-0 = <&pcie0_pins>;
+	pinctrl-names = "default";
+};
+
+&pciec1 {
+	status = "disabled";
+	pinctrl-0 = <&pcie1_pins>;
+	pinctrl-names = "default";
+};
+
+&pciec1_ep {
+	status = "disabled";
+	pinctrl-0 = <&pcie1_pins>;
+	pinctrl-names = "default";
 };
