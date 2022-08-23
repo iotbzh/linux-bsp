@@ -220,6 +220,13 @@
 		#size-cells = <2>;
 		ranges;
 
+		cr52_rproc: cr52@40040000 {
+			compatible = "renesas,rcar-cr7";
+			power-domains = <&sysc R8A779A0_PD_ALWAYS_ON>;
+			resets = <&cpg 222>; //Not available
+			status = "disabled";
+		};
+
 		rwdt: watchdog@e6020000 {
 			compatible = "renesas,r8a779a0-wdt",
 				     "renesas,rcar-gen3-wdt";
@@ -228,6 +235,26 @@
 			power-domains = <&sysc R8A779A0_PD_ALWAYS_ON>;
 			resets = <&cpg 907>;
 			status = "disabled";
+		};
+
+		mfis: mailbox@e6260400 {
+			compatible = "renesas,rcar-ipcc";
+			#mbox-cells = <1>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <0 0xe6260400 0 0x10>;
+			interrupts =
+				<GIC_SPI 440 IRQ_TYPE_LEVEL_HIGH 0>,
+				<GIC_SPI 441 IRQ_TYPE_LEVEL_HIGH 0>;
+			interrupt-names = "tx", "rx";
+			clocks = <&cpg  CPG_MOD 617>;
+			power-domains = <&sysc R8A779A0_PD_ALWAYS_ON>;
+			resets = <&cpg 617>;
+		};
+
+		mfisarembr: mfisarembr@e6260460{
+			compatible = "simple-bus", "syscon", "simple-mfd";
+			reg = <0 0xe6260460 0 0x20>;
 		};
 
 		pwm0: pwm@e6e30000 {
@@ -6472,79 +6499,6 @@
 			compatible = "generic-uio";
 			reg = <0 0xffc79000 0 0x1000>;
 			linux,uio-name = "fcpra_rtdmac";
-		};
-
-		iccom00: mfis@e6260000 {
-			compatible = "generic-uio";
-			reg = <0 0xe6260000 0 0x10000>;
-			interrupts = <GIC_SPI 440 IRQ_TYPE_LEVEL_HIGH 0>;
-			clocks = <&cpg CPG_MOD 617>;
-			power-domains = <&sysc R8A779A0_PD_ALWAYS_ON>;
-			resets = <&cpg 617>;
-			linux,uio-name = "iccom_00";
-		};
-
-		iccom01 {
-			compatible = "generic-uio";
-			reg = <0 0xe6260000 0 0x10000>;
-			interrupts = <GIC_SPI 441 IRQ_TYPE_LEVEL_HIGH 0>;
-			clocks = <&cpg CPG_MOD 617>;
-			power-domains = <&sysc R8A779A0_PD_ALWAYS_ON>;
-			linux,uio-name = "irq_iccom_00_01";
-		};
-
-		iccom02 {
-			compatible = "generic-uio";
-			reg = <0 0xe6260000 0 0x10000>;
-			interrupts = <GIC_SPI 442 IRQ_TYPE_LEVEL_HIGH 0>;
-			clocks = <&cpg CPG_MOD 617>;
-			power-domains = <&sysc R8A779A0_PD_ALWAYS_ON>;
-			linux,uio-name = "irq_iccom_00_02";
-		};
-
-		iccom03 {
-			compatible = "generic-uio";
-			reg = <0 0xe6260000 0 0x10000>;
-			interrupts = <GIC_SPI 443 IRQ_TYPE_LEVEL_HIGH 0>;
-			clocks = <&cpg CPG_MOD 617>;
-			power-domains = <&sysc R8A779A0_PD_ALWAYS_ON>;
-			linux,uio-name = "irq_iccom_00_03";
-		};
-
-		iccom04 {
-			compatible = "generic-uio";
-			reg = <0 0xe6260000 0 0x10000>;
-			interrupts = <GIC_SPI 444 IRQ_TYPE_LEVEL_HIGH 0>;
-			clocks = <&cpg CPG_MOD 617>;
-			power-domains = <&sysc R8A779A0_PD_ALWAYS_ON>;
-			linux,uio-name = "irq_iccom_00_04";
-		};
-
-		iccom05 {
-			compatible = "generic-uio";
-			reg = <0 0xe6260000 0 0x10000>;
-			interrupts = <GIC_SPI 445 IRQ_TYPE_LEVEL_HIGH 0>;
-			clocks = <&cpg CPG_MOD 617>;
-			power-domains = <&sysc R8A779A0_PD_ALWAYS_ON>;
-			linux,uio-name = "irq_iccom_00_05";
-		};
-
-		iccom06 {
-			compatible = "generic-uio";
-			reg = <0 0xe6260000 0 0x10000>;
-			interrupts = <GIC_SPI 446 IRQ_TYPE_LEVEL_HIGH 0>;
-			clocks = <&cpg CPG_MOD 617>;
-			power-domains = <&sysc R8A779A0_PD_ALWAYS_ON>;
-			linux,uio-name = "irq_iccom_00_06";
-		};
-
-		iccom07 {
-			compatible = "generic-uio";
-			reg = <0 0xe6260000 0 0x10000>;
-			interrupts = <GIC_SPI 447 IRQ_TYPE_LEVEL_HIGH 0>;
-			clocks = <&cpg CPG_MOD 617>;
-			power-domains = <&sysc R8A779A0_PD_ALWAYS_ON>;
-			linux,uio-name = "irq_iccom_00_07";
 		};
 
 		qos@e67e0000 {

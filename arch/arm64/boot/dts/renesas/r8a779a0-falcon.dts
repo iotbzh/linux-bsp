@@ -47,6 +47,26 @@
 		#size-cells = <2>;
 		ranges;
 
+		cr52_ram: cr52_ram@40040000 {
+			no-map;
+			reg = <0x0 0x40040000 0x0 0x1fc0000>;
+		};
+
+		vdev0vring0: vdev0vring0@42000000 {
+			no-map;
+			reg = <0x0 0x42000000 0x0 0x1000>;
+		};
+
+		vdev0vring1: vdev0vring1@42001000 {
+			no-map;
+			reg = <0x0 0x42001000 0x0 0x1000>;
+		};
+
+		vdev0buffer: vdev0buffer@42002000 {
+			no-map;
+			reg = <0x0 0x42002000 0x0 0x4000>;
+		};
+
 		/* global autoconfigured region for contiguous allocations */
 		linux,cma@58000000 {
 			compatible = "shared-dma-pool";
@@ -956,4 +976,12 @@
 	channel7 {
 		status = "okay";
 	};
+};
+
+&cr52_rproc {
+	memory-region = <&cr52_ram>, <&vdev0vring0>, <&vdev0vring1>, <&vdev0buffer>;
+	mboxes = <&mfis 0>, <&mfis 1>;
+	mbox-names = "tx", "rx";
+	rcar,syscfg-rsc-tbl = <&mfisarembr 0x0 0xFFFFFFFF>;
+	status = "okay";
 };
