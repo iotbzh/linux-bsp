@@ -1,17 +1,25 @@
+// SPDX-License-Identifier: GPL-2.0
+/*
+ * Copyright (C) 2022-2023 IoT.bzh Company
+ * Authors: Julien Massot <julien.massot@iot.bzh> for IoT.bzh.
+ *          Pierre Marzin <pierre.marzin@iot.bzh> for IoT.bzh.
+ */
+
 #include <linux/bitfield.h>
 #include <linux/clk.h>
 #include <linux/interrupt.h>
 #include <linux/io.h>
+#include <linux/of_device.h>
 #include <linux/mailbox_controller.h>
 #include <linux/module.h>
 #include <linux/platform_device.h>
 
 /* From AP processor to realtime processor */
-#define MFISARIICR0 0x0 /* tx */
-#define MFISARIICR1 0x8 /* rxdone */
+#define MFISARIICR0(x)	(x ? 0x1400 : 0x400)	/* tx */
+#define MFISARIICR1(x)	(x ? 0x2408 : 0x408)	/* rxdone */
 /* From AP realtime to AP processor */
-#define MFISAREICR0 0x4 /* txdone */
-#define MFISAREICR1 0xc /* rx */
+#define MFISAREICR0(x)	(x ? 0x9404 : 0x404)	/* txdone */
+#define MFISAREICR1(x)	(x ? 0x940c : 0x40c)	/* rx */
 
 #define INT_BIT BIT(0)
 #define TX_BIT BIT(1)
@@ -22,12 +30,22 @@ enum {
 	IPCC_IRQ_NUM,
 };
 
+enum rcar_chip_id {
+	GEN3,
+	GEN4,
+};
+
+struct rcar_ipcc_of_data {
+	enum rcar_chip_id chip_id;
+};
+
 struct rcar_ipcc {
 	struct mbox_controller controller;
 	void __iomem *reg_base;
 	struct clk *clk;
 	spinlock_t lock; /* protect access to IPCC registers */
 	int irqs[IPCC_IRQ_NUM];
+	enum rcar_chip_id chip_id;
 };
 
 static inline void rcar_ipcc_set_bits(spinlock_t *lock, void __iomem *reg,
@@ -57,14 +75,14 @@ static irqreturn_t rcar_ipcc_rx_irq(int irq, void *data)
 	irqreturn_t ret = IRQ_NONE;
 
 	/* clear irq */
-	rcar_ipcc_clr_bits(&ipcc->lock, ipcc->reg_base + MFISAREICR1, INT_BIT);
+	rcar_ipcc_clr_bits(&ipcc->lock, ipcc->reg_base + MFISAREICR1(ipcc->chip_id), INT_BIT);
 	
-	status = readl_relaxed(ipcc->reg_base + MFISAREICR1);
+	status = readl_relaxed(ipcc->reg_base + MFISAREICR1(ipcc->chip_id));
 	if (status & TX_BIT) {
 		mbox_chan_received_data(&ipcc->controller.chans[chan], NULL);
 		
 		/* raise irq on remoteproc rx done */
-		rcar_ipcc_set_bits(&ipcc->lock, ipcc->reg_base + MFISARIICR1,
+		rcar_ipcc_set_bits(&ipcc->lock, ipcc->reg_base + MFISARIICR1(ipcc->chip_id),
 				   INT_BIT);
 		ret = IRQ_HANDLED;
 	}
@@ -79,11 +97,11 @@ static irqreturn_t rcar_ipcc_tx_irq(int irq, void *data)
 	uint32_t chan = 0;
 	uint32_t status;
 	/* clear irq */
-	rcar_ipcc_clr_bits(&ipcc->lock, ipcc->reg_base + MFISAREICR0, INT_BIT);
+	rcar_ipcc_clr_bits(&ipcc->lock, ipcc->reg_base + MFISAREICR0(ipcc->chip_id), INT_BIT);
 	
-	status = readl_relaxed(ipcc->reg_base + MFISARIICR0);
+	status = readl_relaxed(ipcc->reg_base + MFISARIICR0(ipcc->chip_id));
 	if (status & TX_BIT) {
-		rcar_ipcc_clr_bits(&ipcc->lock, ipcc->reg_base + MFISARIICR0, TX_BIT);
+		rcar_ipcc_clr_bits(&ipcc->lock, ipcc->reg_base + MFISARIICR0(ipcc->chip_id), TX_BIT);
 		mbox_chan_txdone(&ipcc->controller.chans[chan], 0);
 		ret = IRQ_HANDLED;
 	}
@@ -96,14 +114,14 @@ static int rcar_ipcc_send_data(struct mbox_chan *link, void *data)
 					       controller);
 	uint32_t status;
 
-	status = readl_relaxed(ipcc->reg_base + MFISARIICR0);
+	status = readl_relaxed(ipcc->reg_base + MFISARIICR0(ipcc->chip_id));
 	if (status & TX_BIT) {
 		dev_err(ipcc->controller.dev, "ERROR tx channel is busy !");
 		return -EBUSY;
 	}
 
 	/* set channel occupied, and raise irq on remoteproc */
-	rcar_ipcc_set_bits(&ipcc->lock, ipcc->reg_base + MFISARIICR0,
+	rcar_ipcc_set_bits(&ipcc->lock, ipcc->reg_base + MFISARIICR0(ipcc->chip_id),
 				TX_BIT|INT_BIT);
 	return 0;
 }
@@ -143,6 +161,7 @@ static int rcar_ipcc_probe(struct platform_device *pdev)
 	struct device_node *np = dev->of_node;
 	struct rcar_ipcc *ipcc;
 	struct resource *res;
+	const struct rcar_ipcc_of_data *of_data;
 	static const char * const irq_name[] = {"rx", "tx"};
 	irq_handler_t irq_thread[] = {rcar_ipcc_rx_irq, rcar_ipcc_tx_irq};
 	int ret;
@@ -151,6 +170,10 @@ static int rcar_ipcc_probe(struct platform_device *pdev)
 	if (!np) {
 		dev_err(dev, "No DT found\n");
 		return -ENODEV;
+	} else {
+		of_data = of_device_get_match_data(dev);
+		if (!of_data)
+			return -EINVAL;
 	}
 
 	ipcc = devm_kzalloc(dev, sizeof(*ipcc), GFP_KERNEL);
@@ -189,6 +212,8 @@ static int rcar_ipcc_probe(struct platform_device *pdev)
 		}
 	}
 
+	ipcc->chip_id = of_data->chip_id;
+
 	ipcc->controller.dev = dev;
 	ipcc->controller.txdone_irq = true;
 	ipcc->controller.ops = &rcar_ipcc_ops;
@@ -214,9 +239,24 @@ static int rcar_ipcc_remove(struct platform_device *pdev)
 	return 0;
 }
 
+static const struct rcar_ipcc_of_data of_ipcc_gen4_compatible = {
+	.chip_id = GEN4,
+};
+
+static const struct rcar_ipcc_of_data of_ipcc_gen3_compatible = {
+	.chip_id = GEN3,
+};
+
 static const struct of_device_id rcar_ipcc_of_match[] = {
-	{ .compatible = "renesas,rcar-ipcc" },
-	{},
+	{
+		.compatible = "renesas,rcar-gen4-ipcc",
+		.data = &of_ipcc_gen4_compatible,
+	},
+	{
+		.compatible = "renesas,rcar-gen3-ipcc",
+		.data = &of_ipcc_gen3_compatible,
+	},
+	{ }
 };
 MODULE_DEVICE_TABLE(of, rcar_ipcc_of_match);
 
@@ -232,5 +272,6 @@ static struct platform_driver rcar_ipcc_driver = {
 module_platform_driver(rcar_ipcc_driver);
 
 MODULE_AUTHOR("Julien Massot <julien.massot@iot.bzh>");
+MODULE_AUTHOR("Pierre Marzin <pierre.marzin@iot.bzh>");
 MODULE_DESCRIPTION("Renesas RCAR IPCC driver");
 MODULE_LICENSE("GPL v2");
