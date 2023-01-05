@@ -1133,12 +1133,12 @@
 			status = "disabled";
 		};
 
-		mfis: mailbox@e6260400 {
-			compatible = "renesas,rcar-ipcc";
+		mfis: mailbox@e6260000 {
+			compatible = "renesas,rcar-gen3-ipcc";
 			#mbox-cells = <1>;
 			#address-cells = <1>;
 			#size-cells = <0>;
-			reg = <0 0xe6260400 0 0x10>;
+			reg = <0 0xe6260000 0 0x1000>;
 			interrupts =
 				<GIC_SPI 224 IRQ_TYPE_LEVEL_HIGH>,
 				<GIC_SPI 225 IRQ_TYPE_LEVEL_HIGH>;
