@@ -1,3 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0
+/*
+ * Copyright (C) 2022-2023 IoT.bzh Company
+ * Authors: Julien Massot <julien.massot@iot.bzh> for IoT.bzh.
+ *          Pierre Marzin <pierre.marzin@iot.bzh> for IoT.bzh.
+ */
+
 #include <linux/limits.h>
 #include <linux/mailbox_client.h>
 #include <linux/mfd/syscon.h>
@@ -18,6 +25,11 @@
 #define RSC_TBL_SIZE	1024
 #define RCAR_CR7_FW_ID  0
 
+enum rcar_chip_id {
+	GEN3,
+	GEN4,
+};
+
 struct rcar_syscon {
 	struct regmap *map;
 	u32 reg;
@@ -27,6 +39,8 @@ struct rcar_syscon {
 struct rcar_rproc_conf {
 	bool secured_fw;
 	struct rproc_ops *ops;
+	const char* device_mem_name;
+	enum rcar_chip_id chip_id;
 };
 
 struct rcar_rproc {
@@ -44,7 +58,10 @@ struct rcar_rproc {
 	bool                            secured_fw;
 	bool                            fw_loaded;
 	struct tee_rproc                *trproc;
-
+	const char*			device_mem_name;
+	phys_addr_t			device_mem_addr;
+	phys_addr_t			device_mem_size;
+	enum rcar_chip_id		chip_id;
 };
 
 static void rcar_rproc_vq_work(struct work_struct *work)
@@ -184,15 +201,32 @@ static int rcar_rproc_stop(struct rproc *rproc)
 
 static int rcar_rproc_pa_to_da(struct rproc *rproc, phys_addr_t pa, u64 *da)
 {
-	/* On RCAR da = pa right ? */
-	*da = pa;
+	struct rcar_rproc *priv = rproc->priv;
+	
+	if (priv->chip_id == GEN4 &&
+	    pa >= priv->device_mem_addr &&
+	    pa < priv->device_mem_addr + priv->device_mem_size) {
+		*da = pa - priv->device_mem_addr;
+	}
+	else {
+		*da = pa;
+	}
+
 	return 0;
 };
 
 static int rcar_rproc_da_to_pa(struct rproc *rproc, u64 da, phys_addr_t *pa)
 {
-	/* On RCAR pa = da right ? */
-	*pa = da;
+	struct rcar_rproc *priv = rproc->priv;
+
+	if (priv->chip_id == GEN4 &&
+	    da < priv->device_mem_size) {
+		*pa = da + priv->device_mem_addr;
+	}
+	else {
+		*pa = da;
+	}
+
 	return 0;
 };
 
@@ -218,10 +252,36 @@ static int rcar_rproc_mem_alloc(struct rproc *rproc,
 static int rcar_rproc_mem_release(struct rproc *rproc,
 				   struct rproc_mem_entry *mem)
 {
-	dev_dbg(rproc->dev.parent, "unmap memory: %pa\n", &mem->dma);
+	dev_info(rproc->dev.parent, "unmap memory: %pa\n", &mem->dma);
 	iounmap(mem->va);
 
 	return 0;
+}
+
+static int rcar_rproc_of_get_slave_ram_map(struct rproc *rproc, struct rcar_rproc *priv)
+{
+	struct device *dev = rproc->dev.parent;
+	struct device_node *np = dev->of_node;
+	struct of_phandle_iterator it;
+	struct reserved_mem *rmem;
+
+	/* Register associated reserved memory regions */
+	of_phandle_iterator_init(&it, np, "memory-region", NULL, 0);
+	while (of_phandle_iterator_next(&it) == 0) {
+
+		rmem = of_reserved_mem_lookup(it.node);
+		if (!rmem) {
+			dev_err(&rproc->dev, "unable to acquire memory-region\n");
+			return -EINVAL;
+		}
+		if (strcmp(it.node->name, priv->device_mem_name) == 0) {
+			priv->device_mem_addr = rmem->base;
+			priv->device_mem_size = rmem->size;
+			return 0;
+		}
+	}
+
+	return -ENXIO;
 }
 
 static int rcar_rproc_parse_memory_regions(struct rproc *rproc)
@@ -456,24 +516,39 @@ static int rcar_rproc_get_loaded_rsc_table(struct platform_device *pdev,
 	return 0;
 };
 
-static const struct rcar_rproc_conf rcar_rproc_default_conf = {
+static const struct rcar_rproc_conf rcar_rproc_cr7_default_conf = {
 	.secured_fw = false,
 	.ops = &rcar_rproc_ops,
+	.device_mem_name = "cr7_ram",
+	.chip_id = GEN3,
 };
 
-static const struct rcar_rproc_conf rcar_rproc_tee_conf = {
+static const struct rcar_rproc_conf rcar_rproc_cr7_tee_conf = {
 	.secured_fw = true,
 	.ops = &rcar_rproc_tee_ops,
+	.device_mem_name = "cr7_ram",
+	.chip_id = GEN3,
+};
+
+static const struct rcar_rproc_conf rcar_rproc_cr52_default_conf = {
+	.secured_fw = false,
+	.ops = &rcar_rproc_ops,
+	.device_mem_name = "cr52_ram",
+	.chip_id = GEN4,
 };
 
 static const struct of_device_id rcar_rproc_of_match[] = {
 	{
 		.compatible = "renesas,rcar-cr7",
-		.data = &rcar_rproc_default_conf,
+		.data = &rcar_rproc_cr7_default_conf,
 	},
 	{
 		.compatible = "renesas,rcar-cr7_optee",
-		.data = &rcar_rproc_tee_conf,
+		.data = &rcar_rproc_cr7_tee_conf,
+	},
+	{
+		.compatible = "renesas,rcar-cr52",
+		.data = &rcar_rproc_cr52_default_conf,
 	},
 	{},
 };
@@ -504,6 +579,8 @@ static int rcar_rproc_probe(struct platform_device *pdev)
 	priv->rproc = rproc;
 	priv->dev = dev;
 	priv->secured_fw = conf->secured_fw;
+	priv->device_mem_name = conf->device_mem_name;
+	priv->chip_id = conf->chip_id;
 
 	priv->rst = devm_reset_control_get_exclusive(&pdev->dev, NULL);
 	if (IS_ERR(priv->rst)) {
@@ -520,6 +597,12 @@ static int rcar_rproc_probe(struct platform_device *pdev)
 	}
 
 	dev_set_drvdata(dev, rproc);
+
+	ret = rcar_rproc_of_get_slave_ram_map(rproc, priv);
+	if (ret) {
+		dev_err(&rproc->dev, "failed to get slave address map\n");
+		goto free_rproc;
+	}
 
 	ret = rcar_rproc_get_loaded_rsc_table(pdev, rproc, priv);
 	if (!ret) {
@@ -604,6 +687,7 @@ static struct platform_driver rcar_rproc_driver = {
 
 module_platform_driver(rcar_rproc_driver);
 
-MODULE_LICENSE("GPL v2");
-MODULE_DESCRIPTION("Renesas Gen3 RCAR remote processor control driver");
 MODULE_AUTHOR("Julien Massot <julien.massot@iot.bzh>");
+MODULE_AUTHOR("Pierre Marzin <pierre.marzin@iot.bzh>");
+MODULE_DESCRIPTION("Renesas Gen3/4 RCAR remote processor control driver");
+MODULE_LICENSE("GPL v2");
