@@ -34,6 +34,32 @@
 		reg = <0x4 0x40000000 0x0 0x40000000>;
 	};
 
+	reserved-memory {
+		#address-cells = <2>;
+		#size-cells = <2>;
+		ranges;
+
+		cr52_ram: cr52_ram@e2100000 {
+			no-map;
+			reg = <0x0 0xe2100000 0x0 0x200000>;
+		};
+
+		vdev0vring0: vdev0vring0@42000000 {
+			no-map;
+			reg = <0x0 0x42000000 0x0 0x1000>;
+		};
+
+		vdev0vring1: vdev0vring1@42001000 {
+			no-map;
+			reg = <0x0 0x42001000 0x0 0x1000>;
+		};
+
+		vdev0buffer: vdev0buffer@42002000 {
+			no-map;
+			reg = <0x0 0x42002000 0x0 0x4000>;
+		};
+	};
+
 	reg_1p8v: regulator-1p8v {
 		compatible = "regulator-fixed";
 		regulator-name = "fixed-1.8V";
@@ -295,4 +321,12 @@
 			};
 		};
 	};
+};
+
+&cr52_rproc {
+	memory-region = <&cr52_ram>, <&vdev0vring0>, <&vdev0vring1>, <&vdev0buffer>;
+	mboxes = <&mfis 0>, <&mfis 1>;
+	mbox-names = "tx", "rx";
+	rcar,syscfg-rsc-tbl = <&mfisarembr 0x0 0xFFFFFFFF>;
+	status = "okay";
 };
