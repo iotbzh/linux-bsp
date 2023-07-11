@@ -15,7 +15,7 @@
 
 	aliases {
 		serial0 = &hscif0;
-		serial1 = &hscif1;
+		// serial1 = &hscif1;
 		eth0	= &rswitch;
 	};
 
@@ -253,7 +253,7 @@
 
 	uart-has-rtscts;
 	/* Please use exclusively to the scif0 node */
-	status = "okay";
+	status = "disabled";
 };
 
 &scif_clk {
