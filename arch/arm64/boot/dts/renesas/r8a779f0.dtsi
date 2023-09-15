@@ -291,7 +291,7 @@
 
 		mfisarembr: mfisarembr@e6269460{
 			compatible = "simple-bus", "syscon", "simple-mfd";
-			reg = <0 0xe6269460 0 0x4>;
+			reg = <0 0xe6269460 0 0x20>;
 		};
 
 		pfc: pin-controller@e6050000 {

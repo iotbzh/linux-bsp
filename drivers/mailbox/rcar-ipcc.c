@@ -102,6 +102,7 @@ static irqreturn_t rcar_ipcc_tx_irq(int irq, void *data)
 	status = readl_relaxed(ipcc->reg_base + MFISARIICR0(ipcc->chip_id));
 	if (status & TX_BIT) {
 		rcar_ipcc_clr_bits(&ipcc->lock, ipcc->reg_base + MFISARIICR0(ipcc->chip_id), TX_BIT);
+		/* raise irq on remoteproc tx done */
 		mbox_chan_txdone(&ipcc->controller.chans[chan], 0);
 		ret = IRQ_HANDLED;
 	}
